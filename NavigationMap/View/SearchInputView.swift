@@ -6,11 +6,13 @@
 //
 
 import UIKit
+import MapKit
 
 private let reuseIdentifier = "SearchCell"
 
 protocol SearchInputViewDelegate {
     func animateCenterMapButton(expansionState: SearchInputView.ExpansionState, hideButton: Bool)
+    func handleSearch(withSearchText searchText: String)
 }
 
 class SearchInputView: UIView {
@@ -32,6 +34,13 @@ class SearchInputView: UIView {
     // MARK: - Properties
     
     var delegate: SearchInputViewDelegate?
+    var mapController: MapController?
+    
+    var searchResults: [MKMapItem]? {
+        didSet {
+            tableView.reloadData()
+        }
+    }
     
     enum ExpansionState {
         case NotExpanded
@@ -106,6 +115,15 @@ class SearchInputView: UIView {
     
     // MARK: - Helpers of User Interface
     
+    private func dismissOnSearch() {
+        searchBar.showsCancelButton = false
+        searchBar.endEditing(true)
+        animateInputView(targetPosition: self.frame.origin.y + 400) { (_) in
+            self.delegate?.animateCenterMapButton(expansionState: self.expansionState, hideButton: true)
+            self.expansionState = .PartiallyExpanded
+        }
+    }
+    
     private func configureViewComponents() {
         backgroundColor = .white
         
@@ -165,6 +183,13 @@ class SearchInputView: UIView {
 
 extension SearchInputView: UISearchBarDelegate {
     
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        guard let searchText = searchBar.text else { return }
+        delegate?.handleSearch(withSearchText: searchText)
+        
+        dismissOnSearch()
+    }
+    
     func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
         searchBar.showsCancelButton = true
         
@@ -185,12 +210,7 @@ extension SearchInputView: UISearchBarDelegate {
     }
     
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.showsCancelButton = false
-        searchBar.endEditing(true)
-        animateInputView(targetPosition: self.frame.origin.y + 400) { (_) in
-            self.delegate?.animateCenterMapButton(expansionState: self.expansionState, hideButton: true)
-            self.expansionState = .PartiallyExpanded
-        }
+        dismissOnSearch()
     }
 }
 
@@ -199,13 +219,15 @@ extension SearchInputView: UISearchBarDelegate {
 extension SearchInputView: UITableViewDataSource, UITableViewDelegate {
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return 10
+        return searchResults?.count ?? 0
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
         let cell = tableView.dequeueReusableCell(withIdentifier: reuseIdentifier, for: indexPath) as! SearchCell
         
+        cell.delegate = mapController
+        cell.mapItem = searchResults?[indexPath.row]
         return cell
     }
         

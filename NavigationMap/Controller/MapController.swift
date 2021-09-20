@@ -33,13 +33,13 @@ class MapController: UIViewController {
         configureUI()
         
         enableLocationServices()
-        
+//        centerMapOnUserLocation(shouldLoadAnnotations: true)
     }
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: false)
-        centerMapOnUserLocation()
+        centerMapOnUserLocation(shouldLoadAnnotations: true)
     }
     
     // MARK: - Services
@@ -49,7 +49,7 @@ class MapController: UIViewController {
     // MARK: - Action
     
     @objc private func handleCenterLocation() {
-        centerMapOnUserLocation()
+        centerMapOnUserLocation(shouldLoadAnnotations: false)
     }
     
     // MARK: - Helpers
@@ -59,6 +59,8 @@ class MapController: UIViewController {
         
         searchInputView = SearchInputView()
         searchInputView.delegate = self
+        searchInputView.mapController = self
+        
         view.addSubview(searchInputView)
         searchInputView.anchor(left: view.leftAnchor, bottom: view.bottomAnchor,
                                right: view.rightAnchor,
@@ -82,9 +84,27 @@ class MapController: UIViewController {
     
 }
 
+// MARK: - SearchCellDelegate
+
+extension MapController: SearchCellDelegate {
+    func distanceFromUser(location: CLLocation) -> CLLocationDistance? {
+        guard let userLocation = locationManager.location else {
+            return nil
+        }
+        return userLocation.distance(from: location)
+    }
+}
+
 // MARK: - SearchInputViewDelegate
 
 extension MapController: SearchInputViewDelegate {
+    
+    func handleSearch(withSearchText searchText: String) {
+        removeAnnotations()
+        
+        loadAnnotations(withSearchQuery: searchText)
+    }
+    
     func animateCenterMapButton(expansionState: SearchInputView.ExpansionState, hideButton: Bool) {
         switch expansionState {
         case .NotExpanded:
@@ -118,10 +138,56 @@ extension MapController: SearchInputViewDelegate {
 
 extension MapController {
     
-    private func centerMapOnUserLocation() {
+    private func centerMapOnUserLocation(shouldLoadAnnotations: Bool) {
         guard let coordinates = locationManager.location?.coordinate else { return }
-        let coordinateRegion = MKCoordinateRegion(center: coordinates, latitudinalMeters: 2000, longitudinalMeters: 2000)
+        let coordinateRegion = MKCoordinateRegion(center: coordinates, latitudinalMeters: 3000, longitudinalMeters: 3000)
         mapView.setRegion(coordinateRegion, animated: true)
+        
+        if shouldLoadAnnotations {
+            self.loadAnnotations(withSearchQuery: "Cafe")
+        }
+    }
+    
+    func searchBy(naturalLanguageQuery: String, region: MKCoordinateRegion, coordinate: CLLocationCoordinate2D,
+                  completion: @escaping (_ response: MKLocalSearch.Response?, _ error: NSError?) -> ()) {
+        
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = naturalLanguageQuery
+        request.region = region
+        
+        let search = MKLocalSearch(request: request)
+        search.start { response, error in
+            guard let response = response else {
+                completion(nil, error! as NSError)
+                return
+            }
+            completion(response, nil)
+        }
+    }
+    
+    private func removeAnnotations() {
+        mapView.annotations.forEach { annotation in
+            if let annotation = annotation as? MKPointAnnotation {
+                mapView.removeAnnotation(annotation)
+            }
+//            mapView.removeAnnotation(annotation)
+        }
+    }
+    
+    private func loadAnnotations(withSearchQuery query: String) {
+        guard let coordinate = locationManager.location?.coordinate else { return }
+        let region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 2000, longitudinalMeters: 2000)
+        
+        searchBy(naturalLanguageQuery: query, region: region, coordinate: coordinate) { response, error in
+            response?.mapItems.forEach({ mapItem in
+                let annotation = MKPointAnnotation()
+                annotation.title = mapItem.name
+                annotation.coordinate = mapItem.placemark.coordinate
+                self.mapView.addAnnotation(annotation)
+            })
+            
+            self.searchInputView.searchResults = response?.mapItems
+        }
     }
 }
 
