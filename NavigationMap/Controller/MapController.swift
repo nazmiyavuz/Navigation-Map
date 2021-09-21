@@ -16,15 +16,26 @@ class MapController: UIViewController {
     var searchInputView: SearchInputView!
     
     private lazy var centerMapButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setImage(.mapButton?.withRenderingMode(.alwaysOriginal), for: .normal)
-        button.addTarget(self, action: #selector(handleCenterLocation), for: .touchUpInside)
-        return button
-    }()
+        $0.setImage(.mapButton?.withRenderingMode(.alwaysOriginal), for: .normal)
+        $0.addTarget(self, action: #selector(handleCenterLocation), for: .touchUpInside)
+        return $0
+    }(UIButton(type: .system))
+    
+    private lazy var removeOverlayButton: UIButton = {
+        $0.setImage(#imageLiteral(resourceName: "baseline_clear_white_36pt_1x").withRenderingMode(.alwaysOriginal), for: .normal)
+        $0.backgroundColor = .systemRed
+        $0.addTarget(self, action: #selector(handleRemoveOverlays), for: .touchUpInside)
+        $0.alpha = 0
+        return $0
+    }(UIButton(type: .system))
+    
     
     // MARK: - Properties
     
-    var mapView: MKMapView!
+    private var mapView: MKMapView!
+    private var route: MKRoute?
+    var selectedAnnotation: MKAnnotation?
+    
     
     // MARK: - LifeCycle
     override func viewDidLoad() {
@@ -52,6 +63,22 @@ class MapController: UIViewController {
         centerMapOnUserLocation(shouldLoadAnnotations: false)
     }
     
+    @objc private func handleRemoveOverlays() {
+        UIView.animate(withDuration: 0.5) {
+            self.removeOverlayButton.alpha = 0
+            self.centerMapButton.alpha = 1
+        }
+        if !mapView.overlays.isEmpty {
+            self.mapView.removeOverlay(mapView.overlays[0])
+            centerMapOnUserLocation(shouldLoadAnnotations: false)
+        }
+        
+        searchInputView.enableViewInteraction(true)
+        
+        guard let selectedAnno = selectedAnnotation else { return }
+        mapView.deselectAnnotation(selectedAnno, animated: true)
+    }
+    
     // MARK: - Helpers
     
     private func configureUI() {
@@ -70,12 +97,19 @@ class MapController: UIViewController {
         view.addSubview(centerMapButton)
         centerMapButton.anchor(bottom: searchInputView.topAnchor, right: view.rightAnchor,
                                paddingBottom: 16, paddingRight: 16, width: 50, height: 50)
+        
+        view.addSubview(removeOverlayButton)
+        let dimension: CGFloat = 50
+        removeOverlayButton.anchor(left: view.leftAnchor, bottom: searchInputView.topAnchor,
+                                   paddingLeft: 16, paddingBottom: 266, width: dimension, height: dimension)
+        removeOverlayButton.layer.cornerRadius = dimension / 2
     }
     
     private func configureMapView() {
         mapView = MKMapView()
         
         mapView.showsUserLocation = true
+        mapView.delegate = self
         mapView.userTrackingMode = .follow
         
         view.addSubview(mapView)
@@ -87,6 +121,11 @@ class MapController: UIViewController {
 // MARK: - SearchCellDelegate
 
 extension MapController: SearchCellDelegate {
+    
+    func getDirection(forMApItem mapItem: MKMapItem) {
+        mapItem.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDefault])
+    }
+    
     func distanceFromUser(location: CLLocation) -> CLLocationDistance? {
         guard let userLocation = locationManager.location else {
             return nil
@@ -99,9 +138,26 @@ extension MapController: SearchCellDelegate {
 
 extension MapController: SearchInputViewDelegate {
     
+    func selectAnnotation(withMapItem mapItem: MKMapItem) {
+        for annotation in mapView.annotations where annotation.title == mapItem.name {
+            self.mapView.selectAnnotation(annotation, animated: true)
+            self.zoomToFit(selectedAnnotation: annotation)
+            self.selectedAnnotation = annotation
+            UIView.animate(withDuration: 0.5) {
+                self.removeOverlayButton.alpha = 1
+                self.centerMapButton.alpha = 0
+            }
+        }
+    }
+    
+    func addPollyline(forDestinationMapItem destinationMapItem: MKMapItem) {
+        searchInputView.enableViewInteraction(false)
+        
+        generatePollyline(forDestinationMapItem: destinationMapItem)
+    }
+    
     func handleSearch(withSearchText searchText: String) {
         removeAnnotations()
-        
         loadAnnotations(withSearchQuery: searchText)
     }
     
@@ -127,16 +183,90 @@ extension MapController: SearchInputViewDelegate {
             }
                 
         case .FullyExpanded:
-            UIView.animate(withDuration: 0.25) {
-                self.centerMapButton.alpha = 1
+            if !hideButton {
+                UIView.animate(withDuration: 0.25) {
+                    self.centerMapButton.alpha = 1
+                }
             }
         }
+    }
+}
+
+// MARK: - MKMapViewDelegate
+
+extension MapController: MKMapViewDelegate {
+    
+    func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+        
+        if let route = self.route {
+            let pollyline = route.polyline
+            let linRenderer = MKPolylineRenderer(overlay: pollyline)
+            linRenderer.strokeColor = .systemBlue
+            linRenderer.lineWidth = 3
+            return linRenderer
+        }
+        return MKOverlayRenderer()
     }
 }
 
 // MARK: - MApKit Helper Functions
 
 extension MapController {
+    
+    private func zoomToFit(selectedAnnotation: MKAnnotation?) {
+        if mapView.annotations.isEmpty {
+            return
+        }
+        
+        var topLEftCoordinate = CLLocationCoordinate2D(latitude: -90, longitude: 180)
+        var bottomRightCoordinate = CLLocationCoordinate2D(latitude: 90, longitude: -180)
+        
+        if let selectedAnnotation = selectedAnnotation {
+            for annotation in mapView.annotations {
+                if let userAnno = annotation as? MKUserLocation {
+                    topLEftCoordinate.longitude = fmin(topLEftCoordinate.longitude, userAnno.coordinate.longitude)
+                    topLEftCoordinate.latitude = fmax(topLEftCoordinate.latitude, userAnno.coordinate.latitude)
+                    bottomRightCoordinate.longitude = fmax(bottomRightCoordinate.longitude, userAnno.coordinate.longitude)
+                    bottomRightCoordinate.latitude = fmin(bottomRightCoordinate.latitude, userAnno.coordinate.latitude)
+                }
+                
+                if annotation.title == selectedAnnotation.title {
+                    topLEftCoordinate.longitude = fmin(topLEftCoordinate.longitude, annotation.coordinate.longitude)
+                    topLEftCoordinate.latitude = fmax(topLEftCoordinate.latitude, annotation.coordinate.latitude)
+                    bottomRightCoordinate.longitude = fmax(bottomRightCoordinate.longitude, annotation.coordinate.longitude)
+                    bottomRightCoordinate.latitude = fmin(bottomRightCoordinate.latitude, annotation.coordinate.latitude)
+                }
+            }
+            
+            var region = MKCoordinateRegion(
+                center: CLLocationCoordinate2DMake(
+                    topLEftCoordinate.latitude - (topLEftCoordinate.latitude - bottomRightCoordinate.latitude) * 0.65,
+                    topLEftCoordinate.longitude + (bottomRightCoordinate.longitude - topLEftCoordinate.longitude) * 0.65),
+                span: MKCoordinateSpan(
+                    latitudeDelta: fabs(topLEftCoordinate.latitude - bottomRightCoordinate.latitude) * 3.0,
+                    longitudeDelta: fabs(bottomRightCoordinate.longitude - topLEftCoordinate.longitude) * 3.0))
+            
+            region = mapView.regionThatFits(region)
+            mapView.setRegion(region, animated: true)
+        }
+    }
+    
+    private func generatePollyline(forDestinationMapItem destinationMapItem: MKMapItem) {
+        
+        let request = MKDirections.Request()
+        request.source = MKMapItem.forCurrentLocation()
+        request.destination = destinationMapItem
+        request.transportType = .walking
+        
+        let directions = MKDirections(request: request)
+        directions.calculate { response, error in
+            guard let response = response else { return }
+            self.route = response.routes[0]
+            guard let pollyline = self.route?.polyline else { return }
+            self.mapView.addOverlay(pollyline, level: .aboveRoads)
+        }
+        
+    }
     
     private func centerMapOnUserLocation(shouldLoadAnnotations: Bool) {
         guard let coordinates = locationManager.location?.coordinate else { return }

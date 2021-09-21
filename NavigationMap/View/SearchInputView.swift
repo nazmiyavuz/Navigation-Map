@@ -13,6 +13,8 @@ private let reuseIdentifier = "SearchCell"
 protocol SearchInputViewDelegate {
     func animateCenterMapButton(expansionState: SearchInputView.ExpansionState, hideButton: Bool)
     func handleSearch(withSearchText searchText: String)
+    func addPollyline(forDestinationMapItem destinationMapItem: MKMapItem)
+    func selectAnnotation(withMapItem mapItem: MKMapItem)
 }
 
 class SearchInputView: UIView {
@@ -35,6 +37,7 @@ class SearchInputView: UIView {
     
     var delegate: SearchInputViewDelegate?
     var mapController: MapController?
+    var directionEnable = true
     
     var searchResults: [MKMapItem]? {
         didSet {
@@ -76,6 +79,8 @@ class SearchInputView: UIView {
     
     @objc private func handleSwipeGesture(_ sender: UISwipeGestureRecognizer) {
         
+        guard directionEnable else { return }
+        
         if sender.direction == .up {
             if expansionState == .NotExpanded {
                 delegate?.animateCenterMapButton(expansionState: self.expansionState, hideButton: false)
@@ -113,7 +118,13 @@ class SearchInputView: UIView {
         
     }
     
-    // MARK: - Helpers of User Interface
+    // MARK: - Helper Functions
+    
+    func enableViewInteraction(_ shouldEnable: Bool) {
+        directionEnable = shouldEnable
+        tableView.allowsSelection = shouldEnable
+        searchBar.isUserInteractionEnabled = shouldEnable
+    }
     
     private func dismissOnSearch() {
         searchBar.showsCancelButton = false
@@ -192,7 +203,7 @@ extension SearchInputView: UISearchBarDelegate {
     
     func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
         searchBar.showsCancelButton = true
-        
+                
         if expansionState == .NotExpanded {
             delegate?.animateCenterMapButton(expansionState: self.expansionState, hideButton: true)
             animateInputView(targetPosition: self.frame.origin.y - 650) { (_) in
@@ -202,7 +213,7 @@ extension SearchInputView: UISearchBarDelegate {
         
         if expansionState == .PartiallyExpanded {
             delegate?.animateCenterMapButton(expansionState: self.expansionState, hideButton: true)
-            animateInputView(targetPosition: self.frame.origin.y - 250) { (_) in
+            animateInputView(targetPosition: self.frame.origin.y - 400) { (_) in
                 self.expansionState = .FullyExpanded
             }
         }
@@ -216,7 +227,7 @@ extension SearchInputView: UISearchBarDelegate {
 
 // MARK: - UITableViewDataSource
 
-extension SearchInputView: UITableViewDataSource, UITableViewDelegate {
+extension SearchInputView: UITableViewDataSource {
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return searchResults?.count ?? 0
@@ -230,5 +241,40 @@ extension SearchInputView: UITableViewDataSource, UITableViewDelegate {
         cell.mapItem = searchResults?[indexPath.row]
         return cell
     }
+}
+
+
+// MARK: - UITableViewDelegate
+
+extension SearchInputView: UITableViewDelegate {
+    
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         
+        guard let selectedMapItem = searchResults?[indexPath.row] else { return }
+        delegate?.selectAnnotation(withMapItem: selectedMapItem)
+        
+        // FIXME: Refactor
+        if expansionState == .FullyExpanded {
+            self.searchBar.showsCancelButton = false
+            self.searchBar.endEditing(true)
+            
+            animateInputView(targetPosition: self.frame.origin.y + 400) { (_) in
+                self.delegate?.animateCenterMapButton(expansionState: self.expansionState, hideButton: true)
+                self.expansionState = .PartiallyExpanded
+            }
+        }
+        
+        let firstIndexPath = IndexPath(row: 0, section: 0)
+        tableView.scrollToRow(at: firstIndexPath, at: .top, animated: true)
+        
+        searchResults?.remove(at: indexPath.row)
+        searchResults?.insert(selectedMapItem, at: 0)
+        
+        let cell = tableView.cellForRow(at: firstIndexPath) as? SearchCell
+        cell?.animateButtonIn()
+        
+        delegate?.addPollyline(forDestinationMapItem: selectedMapItem)
+        
+    }
+    
 }

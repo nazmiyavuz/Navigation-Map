@@ -10,13 +10,25 @@ import MapKit
 
 protocol SearchCellDelegate {
     func distanceFromUser(location: CLLocation) -> CLLocationDistance?
+    func getDirection(forMApItem mapItem: MKMapItem)
 }
 
 class SearchCell: UITableViewCell {
     
     // MARK: - UIViews
     
-    lazy var imageContainerView: UIView = {
+    lazy var directionButton: UIButton = {
+        $0.setTitleColor(.white, for: .normal)
+        $0.backgroundColor = .directionsGreen
+        $0.setTitle("Go", for: .normal)
+        $0.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
+        $0.addTarget(self, action: #selector(handleGetDirection), for: .touchUpInside)
+        $0.layer.cornerRadius = 5
+        $0.alpha = 0
+        return $0
+    }(UIButton(type: .system))
+    
+    private lazy var imageContainerView: UIView = {
         $0.backgroundColor = .mainPink
         $0.addSubview(locationImageView)
         locationImageView.center(inView: $0)
@@ -70,6 +82,9 @@ class SearchCell: UITableViewCell {
         
         addSubview(locationDistanceLabel)
         locationDistanceLabel.anchor(left: imageContainerView.rightAnchor, bottom: imageContainerView.bottomAnchor, paddingLeft: 8)
+        
+        contentView.addSubview(directionButton)
+        directionButton.centerY(inView: self, rightAnchor: rightAnchor, paddingRight: 8, width: 50, height: 50)
     }
     
     required init?(coder: NSCoder) {
@@ -80,7 +95,24 @@ class SearchCell: UITableViewCell {
     
     // MARK: - Button Actions
     
+    @objc private func handleGetDirection() {
+        guard let mapItem = self.mapItem else { return }
+        delegate?.getDirection(forMApItem: mapItem)
+    }
+    
     // MARK: - Helpers of User Interface
+    
+    func animateButtonIn() {
+        directionButton.transform = CGAffineTransform(scaleX: 0.25, y: 0.25)
+        UIView.animate(withDuration: 2, delay: 0, usingSpringWithDamping: 1,
+                       initialSpringVelocity: 0, options: .curveEaseInOut) {
+            self.directionButton.alpha = 1
+            self.directionButton.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+        } completion: { _ in
+            self.directionButton.transform = .identity
+        }
+
+    }
     
     private func configureCell() {
         locationTitleLabel.text = mapItem?.name
